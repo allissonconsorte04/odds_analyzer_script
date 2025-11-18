@@ -57,20 +57,26 @@ print(f"\nArquivo será salvo como: {nome_arquivo}")
 def load_json_data():
     data = []
     
-    # Carrega Pitaco
+    # Carrega Pitaco (formato novo com odd_1_plus e odd_2_plus)
     with open('pitaco.json', 'r', encoding='utf-8') as f:
         pitaco_data = json.load(f)
+        # Cria items separados para 1+ e 2+
+        items_1_plus = [{"nome": item["nome"], "linha": "1+", "odd": item.get("odd_1_plus")} for item in pitaco_data if item.get("odd_1_plus")]
+        items_2_plus = [{"nome": item["nome"], "linha": "2+", "odd": item.get("odd_2_plus")} for item in pitaco_data if item.get("odd_2_plus")]
         data.append({
             "casa": "Pitaco",
-            "items": [{"nome": item["nome"], "odds": [{"linha": item["nome"], "odd": item["odd"]}]} for item in pitaco_data]
+            "items": items_1_plus + items_2_plus
         })
     
-    # Carrega Blaze
+    # Carrega Blaze (formato novo com odd_1_plus e odd_2_plus)
     with open('blaze.json', 'r', encoding='utf-8') as f:
         blaze_data = json.load(f)
+        # Cria items separados para 1+ e 2+
+        items_1_plus = [{"nome": item["nome"], "linha": "1+", "odd": item.get("odd_1_plus")} for item in blaze_data if item.get("odd_1_plus")]
+        items_2_plus = [{"nome": item["nome"], "linha": "2+", "odd": item.get("odd_2_plus")} for item in blaze_data if item.get("odd_2_plus")]
         data.append({
             "casa": "Blaze",
-            "items": [{"nome": item["nome"], "odds": [{"linha": "1+", "odd": str(item["odd"])}]} for item in blaze_data]
+            "items": items_1_plus + items_2_plus
         })
     
     # Carrega Estrela
@@ -81,12 +87,15 @@ def load_json_data():
             "items": [{"nome": item["nome"], "odd": item["odd"]} for item in estrela_data]
         })
     
-    # Carrega Bet365
+    # Carrega Bet365 (formato novo com odd_1_plus e odd_2_plus)
     with open('bet365.json', 'r', encoding='utf-8') as f:
         bet365_data = json.load(f)
+        # Cria items separados para 1+ e 2+
+        items_1_plus = [{"nome": item["nome"], "linha": "1+", "odd": item.get("odd_1_plus")} for item in bet365_data if item.get("odd_1_plus")]
+        items_2_plus = [{"nome": item["nome"], "linha": "2+", "odd": item.get("odd_2_plus")} for item in bet365_data if item.get("odd_2_plus")]
         data.append({
             "casa": "Bet365",
-            "items": [{"nome": item["nome"], "odd": item["odd"]} for item in bet365_data]
+            "items": items_1_plus + items_2_plus
         })
     
     return data
@@ -221,95 +230,111 @@ def calculate_similarity(name1, name2):
 def unify_duplicate_players(players, similarity_threshold=0.75):
     """
     Unifica jogadores duplicados automaticamente baseado na similaridade dos nomes.
+    Agora considera a linha (1+ ou 2+) para unificar apenas jogadores da mesma linha.
     """
     print(f"\n=== UNIFICANDO JOGADORES DUPLICADOS (threshold: {similarity_threshold}) ===")
     
-    # Encontrar duplicatas
-    duplicates = []
-    processed = set()
+    # Separar jogadores por linha
+    players_1_plus = [p for p in players if p.get('linha') == '1+']
+    players_2_plus = [p for p in players if p.get('linha') == '2+']
     
-    for i, player1 in enumerate(players):
-        if i in processed:
+    unified_list = []
+    
+    # Processar cada linha separadamente
+    for linha_players, linha in [(players_1_plus, '1+'), (players_2_plus, '2+')]:
+        if not linha_players:
             continue
             
-        current_group = [i]
-        name1 = player1['nome']
+        # Encontrar duplicatas
+        duplicates = []
+        processed = set()
         
-        for j, player2 in enumerate(players[i+1:], i+1):
-            if j in processed:
+        for i, player1 in enumerate(linha_players):
+            if i in processed:
                 continue
                 
-            name2 = player2['nome']
-            similarity, full_name = calculate_similarity(name1, name2)
+            current_group = [i]
+            name1 = player1['nome']
             
-            if similarity >= similarity_threshold:
-                current_group.append(j)
-                processed.add(j)
+            for j, player2 in enumerate(linha_players[i+1:], i+1):
+                if j in processed:
+                    continue
+                    
+                name2 = player2['nome']
+                similarity, full_name = calculate_similarity(name1, name2)
+                
+                if similarity >= similarity_threshold:
+                    current_group.append(j)
+                    processed.add(j)
+            
+            if len(current_group) > 1:
+                duplicates.append(current_group)
+                processed.update(current_group)
         
-        if len(current_group) > 1:
-            duplicates.append(current_group)
-            processed.update(current_group)
-    
-    print(f"Encontrados {len(duplicates)} grupos de jogadores duplicados:")
-    for i, group in enumerate(duplicates):
-        print(f"Grupo {i+1}: {[players[idx]['nome'] for idx in group]}")
-    
-    # Criar novo dicionário para jogadores unificados
-    unified_players = {}
-    processed_indices = set()
-    
-    # Processar grupos de duplicatas
-    for group in duplicates:
-        # Escolher o nome prioritário: 1. Bet365, 2. Nome mais completo
-        group_players = [players[idx] for idx in group]
+        if duplicates:
+            print(f"Encontrados {len(duplicates)} grupos de jogadores duplicados na linha {linha}:")
+            for i, group in enumerate(duplicates):
+                print(f"Grupo {i+1}: {[linha_players[idx]['nome'] for idx in group]}")
         
-        # Verificar se algum jogador do grupo tem odd na Bet365
-        bet365_players = [p for p in group_players if p['Bet365'] is not None]
+        # Criar novo dicionário para jogadores unificados
+        unified_players = {}
+        processed_indices = set()
         
-        if bet365_players:
-            # Prioriza o nome da Bet365
-            main_player = bet365_players[0]
-        else:
-            # Se não houver Bet365, usa o nome mais completo
-            main_player = max(group_players, key=lambda x: len(x['nome']))
-        
-        main_name = main_player['nome']
-        
-        # Combinar odds de todos os jogadores do grupo
-        combined_odds = {
-            'nome': main_name,
-            'Pitaco': None,
-            'Blaze': None,
-            'Estrela': None,
-            'Bet365': None
-        }
-        
-        for player in group_players:
-            for casa in ['Pitaco', 'Blaze', 'Estrela', 'Bet365']:
-                if player[casa] is not None:
-                    # Se a casa já tem uma odd, manter a menor (mais favorável)
-                    if combined_odds[casa] is None or player[casa] < combined_odds[casa]:
-                        combined_odds[casa] = player[casa]
-        
-        unified_players[main_name] = combined_odds
-        processed_indices.update(group)
-        
-        print(f"Unificado: {main_name} <- {[p['nome'] for p in group_players]}")
-    
-    # Adicionar jogadores não duplicados
-    for i, player in enumerate(players):
-        if i not in processed_indices:
-            unified_players[player['nome']] = {
-                'nome': player['nome'],
-                'Pitaco': player['Pitaco'],
-                'Blaze': player['Blaze'],
-                'Estrela': player['Estrela'],
-                'Bet365': player['Bet365']
+        # Processar grupos de duplicatas
+        for group in duplicates:
+            # Escolher o nome prioritário: 1. Bet365, 2. Nome mais completo
+            group_players = [linha_players[idx] for idx in group]
+            
+            # Verificar se algum jogador do grupo tem odd na Bet365
+            bet365_players = [p for p in group_players if p.get('Bet365') is not None]
+            
+            if bet365_players:
+                # Prioriza o nome da Bet365
+                main_player = bet365_players[0]
+            else:
+                # Se não houver Bet365, usa o nome mais completo
+                main_player = max(group_players, key=lambda x: len(x.get('nome', '')))
+            
+            main_name = main_player.get('nome')
+            
+            # Combinar odds de todos os jogadores do grupo
+            combined_odds = {
+                'nome': main_name,
+                'linha': linha,
+                'Pitaco': None,
+                'Blaze': None,
+                'Estrela': None,
+                'Bet365': None
             }
+            
+            for player in group_players:
+                for casa in ['Pitaco', 'Blaze', 'Estrela', 'Bet365']:
+                    if player.get(casa) is not None:
+                        # Se a casa já tem uma odd, manter a menor (mais favorável)
+                        if combined_odds[casa] is None or player[casa] < combined_odds[casa]:
+                            combined_odds[casa] = player[casa]
+            
+            unified_players[main_name] = combined_odds
+            processed_indices.update(group)
+            
+            print(f"Unificado ({linha}): {main_name} <- {[p.get('nome') for p in group_players]}")
+        
+        # Adicionar jogadores não duplicados
+        for i, player in enumerate(linha_players):
+            if i not in processed_indices:
+                unified_players[player.get('nome')] = {
+                    'nome': player.get('nome'),
+                    'linha': linha,
+                    'Pitaco': player.get('Pitaco'),
+                    'Blaze': player.get('Blaze'),
+                    'Estrela': player.get('Estrela'),
+                    'Bet365': player.get('Bet365')
+                }
+        
+        unified_list.extend(list(unified_players.values()))
     
-    # Converter de volta para lista e ordenar
-    unified_list = list(unified_players.values())
-    unified_list.sort(key=lambda x: x['nome'])
+    # Ordenar por nome e linha
+    unified_list.sort(key=lambda x: (x.get('nome', ''), x.get('linha', '')))
     
     print(f"Total de jogadores antes: {len(players)}")
     print(f"Total de jogadores depois: {len(unified_list)}")
@@ -481,10 +506,7 @@ def analyze_kelly_opportunities(players_data):
 # Lista para armazenar nomes unificados
 final_results = []
 
-# Lista de nomes já unificados
-unified_names = []
-
-# Percorre cada casa
+# Percorre cada casa e cria um registro para cada jogador
 for casa_data in data:
     casa = casa_data['casa']
     for item in casa_data['items']:
@@ -492,49 +514,19 @@ for casa_data in data:
         if not original_name:
             continue
 
-        name_norm = normalize_name(original_name)
-
-        # Se já existe um nome similar, unifica
-        # Aumenta o score_cutoff para ser mais rigoroso e evita unificações incorretas
-        match = process.extractOne(name_norm, unified_names, score_cutoff=90) if unified_names else None
-
-        if match:
-            match_name = match[0]
-            match_score = match[1]
-            
-            # Validação adicional: verifica se os nomes são realmente similares
-            # Evita unificações como "E. Ribeiro" com "Luiz Gustavo Marinho Ribeiro dos Santos"
-            original_words = set(name_norm.split())
-            match_words = set(match_name.split())
-            
-            # Se um nome tem muito mais palavras que o outro, provavelmente são pessoas diferentes
-            if abs(len(original_words) - len(match_words)) > 2:
-                match = None
-            # Se menos de 50% das palavras são comuns, são pessoas diferentes
-            elif len(original_words.intersection(match_words)) / max(len(original_words), len(match_words)) < 0.5:
-                match = None
-        
-        if match:
-            match_name = match[0]
-            # Atualiza odds no registro existente
-            for record in final_results:
-                if normalize_name(record['nome']) == match_name:
-                    val = parse_odds(item['odd'] if 'odd' in item else item['odds'][0]['odd'])
-                    if val is not None:
-                        record[casa] = val
-                    break
-        else:
-            # Novo registro
-            unified_names.append(name_norm)
-            val = parse_odds(item['odd'] if 'odd' in item else item['odds'][0]['odd'])
-            final_results.append({
-                'nome': original_name,
-                'Pitaco': None,
-                'Blaze': None,
-                'Estrela': None,
-                'Bet365': None,
-                casa: val
-            })
+        # Cria um novo registro para cada jogador (sem unificação prévia)
+        # Agora também inclui a linha (1+ ou 2+)
+        linha = item.get('linha', '1+')  # Default para 1+ se não especificado
+        val = parse_odds(item.get('odd'))
+        final_results.append({
+            'nome': original_name,
+            'linha': linha,
+            'Pitaco': None,
+            'Blaze': None,
+            'Estrela': None,
+            'Bet365': None,
+            casa: val
+        })
 
 # Aplica unificação genérica de jogadores duplicados
 final_results = unify_duplicate_players(final_results)
@@ -544,28 +536,41 @@ print("--- RESULTADO UNIFICADO ---")
 for r in final_results:
     print(r)
 
-# --- Highlight: 5 nomes com maiores diferenças de odds ---
-highlight = []
+# --- Highlight: maiores diferenças de odds por linha (1+ e 2+) ---
+highlight_1_plus = []
+highlight_2_plus = []
 
 for record in final_results:
+    linha = record.get('linha', '1+')
     # Pega apenas as odds que não são None
     odds = [v for k, v in record.items() if k in ['Pitaco', 'Blaze', 'Estrela', 'Bet365'] and v is not None]
     
     # Considera apenas se houver pelo menos 2 casas com odd diferente
     if len(set(odds)) >= 2:
         diff = max(odds) - min(odds)
-        highlight.append({
-            'nome': record['nome'],
+        highlight_item = {
+            'nome': record.get('nome'),
+            'linha': linha,
             'diferença_max': diff,
             'odds': {k: v for k, v in record.items() if k in ['Pitaco', 'Blaze', 'Estrela', 'Bet365'] and v is not None}
-        })
+        }
+        
+        if linha == '1+':
+            highlight_1_plus.append(highlight_item)
+        elif linha == '2+':
+            highlight_2_plus.append(highlight_item)
 
 # Ordena pela maior diferença
-highlight_sorted = sorted(highlight, key=lambda x: x['diferença_max'], reverse=True)
+highlight_1_plus_sorted = sorted(highlight_1_plus, key=lambda x: x['diferença_max'], reverse=True)
+highlight_2_plus_sorted = sorted(highlight_2_plus, key=lambda x: x['diferença_max'], reverse=True)
 
 # Mostra todas as diferenças
-print(f"\n--- HIGHLIGHT: {len(highlight_sorted)} maiores diferenças de odds ---")
-for h in highlight_sorted:
+print(f"\n--- HIGHLIGHT: {len(highlight_1_plus_sorted)} maiores diferenças de odds (1+) ---")
+for h in highlight_1_plus_sorted:
+    print(h)
+
+print(f"\n--- HIGHLIGHT: {len(highlight_2_plus_sorted)} maiores diferenças de odds (2+) ---")
+for h in highlight_2_plus_sorted:
     print(h)
 
 # === ANÁLISE DO CRITÉRIO DE KELLY ===
@@ -616,7 +621,8 @@ resultado_completo = {
     "jogo": f"{time_mandante} vs {time_visitante}",
     "data_processamento": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     "jogadores": final_results,
-    "maiores_diferencas": highlight_sorted,  # Salva todas as diferenças
+    "maiores_diferencas_1_plus": highlight_1_plus_sorted,  # Salva todas as diferenças 1+
+    "maiores_diferencas_2_plus": highlight_2_plus_sorted,  # Salva todas as diferenças 2+
     "analise_kelly": {
         "metodologia": {
             "tipo": "CRITÉRIO DE KELLY CONSERVADOR",
@@ -638,7 +644,8 @@ with open(nome_arquivo, 'w', encoding='utf-8') as f:
 
 print(f"\n✅ Resultado unificado salvo em: {nome_arquivo}")
 print(f"📊 Total de jogadores únicos: {len(final_results)}")
-print(f"🎯 Maiores diferenças encontradas: {len(highlight_sorted)}")
+print(f"🎯 Maiores diferenças encontradas (1+): {len(highlight_1_plus_sorted)}")
+print(f"🎯 Maiores diferenças encontradas (2+): {len(highlight_2_plus_sorted)}")
 print(f"💰 Oportunidades Kelly analisadas: {len(kelly_analysis)}")
 print(f"🚀 Oportunidades lucrativas encontradas: {len(profitable_opportunities)}")
 print(f"🔄 Unificação automática aplicada com sucesso!")
