@@ -163,6 +163,28 @@ def is_abbreviation(name1, name2):
     if norm2 in norm1 and len(norm2) < len(norm1):
         return True, norm1
     
+    # Verificar casos como "A. Cantalapiedra" vs "Aitor Cantalapiedra"
+    # Onde a primeira palavra é uma inicial (1-2 caracteres) e o sobrenome é igual
+    words1 = norm1.split()
+    words2 = norm2.split()
+    
+    if len(words1) >= 2 and len(words2) >= 2:
+        # Pega a primeira palavra e o resto (sobrenome)
+        first1 = words1[0]
+        rest1 = ' '.join(words1[1:])
+        first2 = words2[0]
+        rest2 = ' '.join(words2[1:])
+        
+        # Se o sobrenome é igual
+        if rest1 == rest2:
+            # Se uma primeira palavra é inicial (1-2 chars) e a outra começa com essa letra
+            if len(first1) <= 2 and len(first2) > 2:
+                if first1[0] == first2[0]:
+                    return True, norm2
+            if len(first2) <= 2 and len(first1) > 2:
+                if first2[0] == first1[0]:
+                    return True, norm1
+    
     return False, None
 
 def calculate_similarity(name1, name2):
@@ -171,6 +193,10 @@ def calculate_similarity(name1, name2):
     """
     norm1 = normalize_name_for_unification(name1)
     norm2 = normalize_name_for_unification(name2)
+    
+    # Se os nomes normalizados são idênticos, retorna similaridade máxima
+    if norm1 == norm2:
+        return 1.0, norm1
     
     # Similaridade básica usando SequenceMatcher
     basic_similarity = SequenceMatcher(None, norm1, norm2).ratio()
@@ -320,16 +346,26 @@ def unify_duplicate_players(players, similarity_threshold=0.75):
             print(f"Unificado ({linha}): {main_name} <- {[p.get('nome') for p in group_players]}")
         
         # Adicionar jogadores não duplicados
+        # IMPORTANTE: Combinar jogadores com o mesmo nome exato (mesmo que não sejam detectados como similares)
         for i, player in enumerate(linha_players):
             if i not in processed_indices:
-                unified_players[player.get('nome')] = {
-                    'nome': player.get('nome'),
-                    'linha': linha,
-                    'Pitaco': player.get('Pitaco'),
-                    'Blaze': player.get('Blaze'),
-                    'Estrela': player.get('Estrela'),
-                    'Bet365': player.get('Bet365')
-                }
+                player_name = player.get('nome')
+                # Se já existe um jogador com esse nome, combinar as odds
+                if player_name in unified_players:
+                    # Combinar odds, mantendo a menor (mais favorável) quando houver múltiplas
+                    for casa in ['Pitaco', 'Blaze', 'Estrela', 'Bet365']:
+                        if player.get(casa) is not None:
+                            if unified_players[player_name][casa] is None or player[casa] < unified_players[player_name][casa]:
+                                unified_players[player_name][casa] = player[casa]
+                else:
+                    unified_players[player_name] = {
+                        'nome': player_name,
+                        'linha': linha,
+                        'Pitaco': player.get('Pitaco'),
+                        'Blaze': player.get('Blaze'),
+                        'Estrela': player.get('Estrela'),
+                        'Bet365': player.get('Bet365')
+                    }
         
         unified_list.extend(list(unified_players.values()))
     

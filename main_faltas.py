@@ -168,17 +168,39 @@ def is_abbreviation(name1, name2):
     if norm2 in norm1 and len(norm2) < len(norm1):
         return True, norm1
     
+    # Verificar casos como "A. Cantalapiedra" vs "Aitor Cantalapiedra"
+    # Onde a primeira palavra é uma inicial (1-2 caracteres) e o sobrenome é igual
+    words1 = norm1.split()
+    words2 = norm2.split()
+    
+    if len(words1) >= 2 and len(words2) >= 2:
+        # Pega a primeira palavra e o resto (sobrenome)
+        first1 = words1[0]
+        rest1 = ' '.join(words1[1:])
+        first2 = words2[0]
+        rest2 = ' '.join(words2[1:])
+        
+        # Se o sobrenome é igual
+        if rest1 == rest2:
+            # Se uma primeira palavra é inicial (1-2 chars) e a outra começa com essa letra
+            if len(first1) <= 2 and len(first2) > 2:
+                if first1[0] == first2[0]:
+                    return True, norm2
+            if len(first2) <= 2 and len(first1) > 2:
+                if first2[0] == first1[0]:
+                    return True, norm1
+    
     # Verificar apelidos: se um nome curto aparece como palavra completa no outro
-    words1 = set(norm1.split())
-    words2 = set(norm2.split())
+    words1_set = set(words1)
+    words2_set = set(words2)
     
     # Se um nome tem apenas uma palavra e essa palavra aparece no outro nome
-    if len(words1) == 1 and list(words1)[0] in norm2 and len(list(words1)[0]) >= 4:
+    if len(words1_set) == 1 and list(words1_set)[0] in norm2 and len(list(words1_set)[0]) >= 4:
         # Verificar se há sobrenome em comum (palavras com 4+ caracteres)
         long_words2 = [w for w in words2 if len(w) >= 4]
         if long_words2:
             return True, norm2
-    if len(words2) == 1 and list(words2)[0] in norm1 and len(list(words2)[0]) >= 4:
+    if len(words2_set) == 1 and list(words2_set)[0] in norm1 and len(list(words2_set)[0]) >= 4:
         long_words1 = [w for w in words1 if len(w) >= 4]
         if long_words1:
             return True, norm1
@@ -192,6 +214,10 @@ def calculate_similarity(name1, name2):
     norm1 = normalize_name_for_unification(name1)
     norm2 = normalize_name_for_unification(name2)
     
+    # Se os nomes normalizados são idênticos, retorna similaridade máxima
+    if norm1 == norm2:
+        return 1.0, norm1
+    
     # Similaridade básica usando SequenceMatcher
     basic_similarity = SequenceMatcher(None, norm1, norm2).ratio()
     
@@ -203,6 +229,20 @@ def calculate_similarity(name1, name2):
     # Verificar similaridade de palavras
     words1 = set(norm1.split())
     words2 = set(norm2.split())
+    
+    # VERIFICAÇÃO RESTRITIVA: Se não há palavras significativas (4+ caracteres) em comum,
+    # a similaridade deve ser muito baixa para evitar unificações incorretas
+    # Ex: "Camutanga" vs "Gustavo Gomez" -> nenhuma palavra em comum -> não unifica
+    significant_words1 = {w for w in words1 if len(w) >= 4}
+    significant_words2 = {w for w in words2 if len(w) >= 4}
+    
+    # Se ambos têm palavras significativas mas nenhuma em comum, similaridade muito baixa
+    if significant_words1 and significant_words2:
+        if not significant_words1.intersection(significant_words2):
+            # Nenhuma palavra significativa em comum - retorna similaridade muito baixa
+            # Apenas permite se a similaridade básica for muito alta (nomes quase idênticos)
+            if basic_similarity < 0.7:
+                return 0.3, None  # Similaridade muito baixa, não deve unificar
     
     # Verificar se um nome curto (apelido) aparece como palavra no outro nome mais longo
     # Ex: "Vitinho" vs "Vitinho da Silva" ou "Victor Da Silva Vitinho"
@@ -418,7 +458,27 @@ def unify_duplicate_players(players, similarity_threshold=0.75):
             name2 = player2['nome']
             similarity, full_name = calculate_similarity(name1, name2)
             
-            if similarity >= similarity_threshold:
+            # Verificação adicional: se não há palavras significativas (4+ caracteres) em comum,
+            # não unifica mesmo que a similaridade seja alta
+            norm1 = normalize_name_for_unification(name1)
+            norm2 = normalize_name_for_unification(name2)
+            words1 = set(norm1.split())
+            words2 = set(norm2.split())
+            significant_words1 = {w for w in words1 if len(w) >= 4}
+            significant_words2 = {w for w in words2 if len(w) >= 4}
+            
+            # Se ambos têm palavras significativas mas nenhuma em comum, não unifica
+            has_common_significant_word = False
+            if significant_words1 and significant_words2:
+                has_common_significant_word = bool(significant_words1.intersection(significant_words2))
+            elif not significant_words1 and not significant_words2:
+                # Ambos são nomes curtos, permite unificação se similaridade for alta
+                has_common_significant_word = True
+            elif similarity >= 0.9:
+                # Se a similaridade é muito alta (quase idênticos), permite mesmo sem palavras significativas
+                has_common_significant_word = True
+            
+            if similarity >= similarity_threshold and has_common_significant_word:
                 current_group.append(j)
                 processed.add(j)
         
@@ -482,18 +542,29 @@ def unify_duplicate_players(players, similarity_threshold=0.75):
         print(f"Unificado: {main_name} <- {[p['nome'] for p in group_players]}")
     
     # Adicionar jogadores não duplicados
+    # IMPORTANTE: Combinar jogadores com o mesmo nome exato e linha (mesmo que não sejam detectados como similares)
     for i, player in enumerate(players):
         if i not in processed_indices:
             linha = player.get('linha', '1+')
             key = f"{player['nome']}_{linha}"
-            unified_players[key] = {
-                'nome': player['nome'],
-                'linha': linha,
-                'Pitaco': player['Pitaco'],
-                'Blaze': player['Blaze'],
-                'Bet365': player['Bet365'],
-                'KTO': player.get('KTO')
-            }
+            player_name = player['nome']
+            
+            # Se já existe um jogador com esse nome e linha, combinar as odds
+            if key in unified_players:
+                # Combinar odds, mantendo a menor (mais favorável) quando houver múltiplas
+                for casa in ['Pitaco', 'Blaze', 'Bet365', 'KTO']:
+                    if player.get(casa) is not None:
+                        if unified_players[key][casa] is None or player[casa] < unified_players[key][casa]:
+                            unified_players[key][casa] = player[casa]
+            else:
+                unified_players[key] = {
+                    'nome': player_name,
+                    'linha': linha,
+                    'Pitaco': player.get('Pitaco'),
+                    'Blaze': player.get('Blaze'),
+                    'Bet365': player.get('Bet365'),
+                    'KTO': player.get('KTO')
+                }
     
     # Converter de volta para lista e ordenar
     unified_list = list(unified_players.values())
